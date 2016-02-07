@@ -34,7 +34,48 @@ CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
 COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
 
 
+--
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
 SET search_path = public, pg_catalog;
+
+--
+-- Name: comment_created_deleted(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION comment_created_deleted() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+-- Действия при создании/удалении комментария
+declare
+	allCommentsFeed integer;
+begin
+	if TG_OP = 'INSERT' then
+		select id into allCommentsFeed from feeds where type = 2 and subtype = 202 and owner_id = NEW.author_id;
+		insert into feed_posts (post_id, feed_id) values (NEW.post_id, allCommentsFeed) on conflict do nothing;
+	end if;
+
+	if TG_OP = 'DELETE' then
+		if not exists(select 1 from comments where post_id = OLD.post_id and author_id = OLD.author_id) then
+			select id into allCommentsFeed from feeds where type = 2 and subtype = 202 and owner_id = OLD.author_id;
+			delete from feed_posts where post_id = OLD.post_id and feed_id = allCommentsFeed;
+		end if;
+	end if;
+
+	return null;
+end;$$;
+
 
 --
 -- Name: feed_posts_changes(); Type: FUNCTION; Schema: public; Owner: -
@@ -72,14 +113,14 @@ COMMENT ON FUNCTION feed_posts_changes() IS 'Обновление posts.feed_ids
 CREATE FUNCTION feed_readers_changes() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
--- Обновление users.private_feed_ids при вставке/удалении в таблице feed_readers.
+-- Обновление users.visible_private_feed_ids при вставке/удалении в таблице feed_readers.
 begin
 	if TG_OP = 'INSERT' then
-		update users set private_feed_ids = private_feed_ids + NEW.feed_id where id = NEW.user_id;
+		update users set visible_private_feed_ids = visible_private_feed_ids + NEW.feed_id where id = NEW.user_id;
 	end if;
 
 	if TG_OP = 'DELETE' then
-		update users set private_feed_ids = private_feed_ids - OLD.feed_id where id = OLD.user_id;
+		update users set visible_private_feed_ids = visible_private_feed_ids - OLD.feed_id where id = OLD.user_id;
 	end if;
 
 	return null;
@@ -91,7 +132,92 @@ $$;
 -- Name: FUNCTION feed_readers_changes(); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION feed_readers_changes() IS 'Обновление users.private_feed_ids при вставке/удалении в таблице feed_readers.';
+COMMENT ON FUNCTION feed_readers_changes() IS 'Обновление users.visible_private_feed_ids при вставке/удалении в таблице feed_readers.';
+
+
+--
+-- Name: like_created_deleted(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION like_created_deleted() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+-- Действия при создании/удалении лайка
+declare
+	allLikesFeed integer;
+begin
+	if TG_OP = 'INSERT' then
+		select id into allLikesFeed from feeds where type = 2 and subtype = 203 and owner_id = NEW.user_id;
+		insert into feed_posts (post_id, feed_id) values (NEW.post_id, allCommentsFeed) on conflict do nothing;
+	end if;
+
+	if TG_OP = 'DELETE' then
+		if not exists(select 1 from likes where post_id = OLD.post_id and user_id = OLD.user_id) then
+			select id into allLikesFeed from feeds where type = 2 and subtype = 203 and owner_id = OLD.user_id;
+			delete from feed_posts where post_id = OLD.post_id and feed_id = allLikesFeed;
+		end if;
+	end if;
+
+	return null;
+end;$$;
+
+
+--
+-- Name: post_created(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION post_created() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+-- Действия при создании поста
+declare
+	allPostsFeed integer;
+begin
+	select id into allPostsFeed from feeds where type = 2 and subtype = 201 and owner_id = NEW.author_id;
+	insert into feed_posts (post_id, feed_id) values (NEW.id, allPostsFeed);
+
+	return null;
+end;$$;
+
+
+--
+-- Name: FUNCTION post_created(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION post_created() IS 'Действия при создании поста';
+
+
+--
+-- Name: user_created(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION user_created() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+-- Создание фидов для нового пользователя
+declare
+	directId integer;
+begin
+	insert into feeds (type, subtype, owner_id) values (1, 101, NEW.id);
+	if not NEW.is_group then
+		insert into feeds (type, subtype, owner_id, is_public) values (1, 101, NEW.id, false) returning id into directId;
+		insert into feed_readers (feed_id, user_id) values (directId, NEW.id);
+		
+		insert into feeds (type, subtype, owner_id) values (2, 201, NEW.id);
+		insert into feeds (type, subtype, owner_id) values (2, 202, NEW.id);
+		insert into feeds (type, subtype, owner_id) values (2, 203, NEW.id);
+	end if;
+
+	return null;
+end;
+$$;
+
+
+--
+-- Name: FUNCTION user_created(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION user_created() IS 'Создание фидов для нового пользователя';
 
 
 SET default_tablespace = '';
@@ -247,7 +373,7 @@ COMMENT ON TABLE feed_writers IS 'Пользователи, которые им�
 
 CREATE TABLE feeds (
     id integer NOT NULL,
-    uid uuid NOT NULL,
+    uid uuid DEFAULT gen_random_uuid() NOT NULL,
     subtype integer NOT NULL,
     is_public boolean DEFAULT true NOT NULL,
     owner_id integer,
@@ -315,7 +441,7 @@ ALTER SEQUENCE feeds_id_seq OWNED BY feeds.id;
 
 CREATE TABLE files (
     id integer NOT NULL,
-    uid uuid NOT NULL,
+    uid uuid DEFAULT gen_random_uuid() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     file_hash bytea NOT NULL,
     size integer NOT NULL,
@@ -452,7 +578,7 @@ ALTER SEQUENCE post_attachments_ord_seq OWNED BY post_attachments.ord;
 
 CREATE TABLE posts (
     id integer NOT NULL,
-    uid uuid NOT NULL,
+    uid uuid DEFAULT gen_random_uuid() NOT NULL,
     author_id integer NOT NULL,
     body text NOT NULL,
     is_public boolean DEFAULT true NOT NULL,
@@ -502,7 +628,7 @@ ALTER SEQUENCE posts_id_seq OWNED BY posts.id;
 
 CREATE TABLE users (
     id integer NOT NULL,
-    uid uuid NOT NULL,
+    uid uuid DEFAULT gen_random_uuid() NOT NULL,
     username text NOT NULL,
     screenname text NOT NULL,
     description text DEFAULT ''::text NOT NULL,
@@ -882,6 +1008,34 @@ CREATE TRIGGER feed_posts_changes_trg AFTER INSERT OR DELETE ON feed_posts FOR E
 --
 
 CREATE TRIGGER feed_readers_changes_trg AFTER INSERT OR DELETE ON feed_readers FOR EACH ROW EXECUTE PROCEDURE feed_readers_changes();
+
+
+--
+-- Name: trg_comment_created_deleted; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_comment_created_deleted AFTER INSERT OR DELETE ON comments FOR EACH ROW EXECUTE PROCEDURE comment_created_deleted();
+
+
+--
+-- Name: trg_like_created_deleted; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_like_created_deleted AFTER INSERT OR DELETE ON likes FOR EACH ROW EXECUTE PROCEDURE like_created_deleted();
+
+
+--
+-- Name: trg_post_created; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_post_created AFTER INSERT ON posts FOR EACH ROW EXECUTE PROCEDURE post_created();
+
+
+--
+-- Name: trg_user_created; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_user_created AFTER INSERT ON users FOR EACH ROW EXECUTE PROCEDURE user_created();
 
 
 --
