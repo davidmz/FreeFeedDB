@@ -62,13 +62,13 @@ declare
 	allCommentsFeed integer;
 begin
 	if TG_OP = 'INSERT' then
-		select id into allCommentsFeed from feeds where type = 2 and subtype = 202 and owner_id = NEW.author_id;
+		select id into allCommentsFeed from feeds where type = 202 and owner_id = NEW.author_id;
 		insert into feed_posts (post_id, feed_id) values (NEW.post_id, allCommentsFeed) on conflict do nothing;
 	end if;
 
 	if TG_OP = 'DELETE' then
 		if not exists(select 1 from comments where post_id = OLD.post_id and author_id = OLD.author_id) then
-			select id into allCommentsFeed from feeds where type = 2 and subtype = 202 and owner_id = OLD.author_id;
+			select id into allCommentsFeed from feeds where type = 202 and owner_id = OLD.author_id;
 			delete from feed_posts where post_id = OLD.post_id and feed_id = allCommentsFeed;
 		end if;
 	end if;
@@ -147,13 +147,13 @@ declare
 	allLikesFeed integer;
 begin
 	if TG_OP = 'INSERT' then
-		select id into allLikesFeed from feeds where type = 2 and subtype = 203 and owner_id = NEW.user_id;
+		select id into allLikesFeed from feeds where type = 203 and owner_id = NEW.user_id;
 		insert into feed_posts (post_id, feed_id) values (NEW.post_id, allCommentsFeed) on conflict do nothing;
 	end if;
 
 	if TG_OP = 'DELETE' then
 		if not exists(select 1 from likes where post_id = OLD.post_id and user_id = OLD.user_id) then
-			select id into allLikesFeed from feeds where type = 2 and subtype = 203 and owner_id = OLD.user_id;
+			select id into allLikesFeed from feeds where type = 203 and owner_id = OLD.user_id;
 			delete from feed_posts where post_id = OLD.post_id and feed_id = allLikesFeed;
 		end if;
 	end if;
@@ -173,7 +173,7 @@ CREATE FUNCTION post_created() RETURNS trigger
 declare
 	allPostsFeed integer;
 begin
-	select id into allPostsFeed from feeds where type = 2 and subtype = 201 and owner_id = NEW.author_id;
+	select id into allPostsFeed from feeds where type = 201 and owner_id = NEW.author_id;
 	insert into feed_posts (post_id, feed_id) values (NEW.id, allPostsFeed);
 
 	return null;
@@ -198,14 +198,14 @@ CREATE FUNCTION user_created() RETURNS trigger
 declare
 	directId integer;
 begin
-	insert into feeds (type, subtype, owner_id) values (1, 101, NEW.id);
+	insert into feeds (type, owner_id) values (101, NEW.id);
 	if not NEW.is_group then
-		insert into feeds (type, subtype, owner_id, is_public) values (1, 101, NEW.id, false) returning id into directId;
+		insert into feeds (type, owner_id, is_public) values (101, NEW.id, false) returning id into directId;
 		insert into feed_readers (feed_id, user_id) values (directId, NEW.id);
 		
-		insert into feeds (type, subtype, owner_id) values (2, 201, NEW.id);
-		insert into feeds (type, subtype, owner_id) values (2, 202, NEW.id);
-		insert into feeds (type, subtype, owner_id) values (2, 203, NEW.id);
+		insert into feeds (type, owner_id) values (201, NEW.id);
+		insert into feeds (type, owner_id) values (202, NEW.id);
+		insert into feeds (type, owner_id) values (203, NEW.id);
 	end if;
 
 	return null;
@@ -374,7 +374,6 @@ COMMENT ON TABLE feed_writers IS 'Пользователи, которые им�
 CREATE TABLE feeds (
     id integer NOT NULL,
     uid uuid DEFAULT gen_random_uuid() NOT NULL,
-    subtype integer NOT NULL,
     is_public boolean DEFAULT true NOT NULL,
     owner_id integer,
     type integer NOT NULL
@@ -386,13 +385,6 @@ CREATE TABLE feeds (
 --
 
 COMMENT ON COLUMN feeds.uid IS 'Для совместимости с FreeFeed-ом';
-
-
---
--- Name: COLUMN feeds.subtype; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN feeds.subtype IS 'Подтип фида: 1 — фид юзера / группы, 2 — директ-фид, …';
 
 
 --
@@ -413,7 +405,7 @@ COMMENT ON COLUMN feeds.owner_id IS 'Владелец фида (юзер/гру�
 -- Name: COLUMN feeds.type; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN feeds.type IS 'Тип фида: 1 — базовый, 2 — фильтр.';
+COMMENT ON COLUMN feeds.type IS 'Тип фида';
 
 
 --
