@@ -197,15 +197,27 @@ CREATE FUNCTION user_created() RETURNS trigger
 -- Создание фидов для нового пользователя
 declare
 	directId integer;
+	feed101 integer;
+	feed202 integer;
+	feed203 integer;
 begin
-	insert into feeds (type, owner_id) values (101, NEW.id);
+	-- Собственный фид
+	insert into feeds (type, owner_id) values (101, NEW.id) returning id into feed101;
 	if not NEW.is_group then
-		insert into feeds (type, owner_id, is_public) values (101, NEW.id, false) returning id into directId;
+		-- Директ-фид
+		insert into feeds (type, owner_id, is_public) values (102, NEW.id, false) returning id into directId;
 		insert into feed_readers (feed_id, user_id) values (directId, NEW.id);
-		
+
+		-- Фид постов
 		insert into feeds (type, owner_id) values (201, NEW.id);
-		insert into feeds (type, owner_id) values (202, NEW.id);
-		insert into feeds (type, owner_id) values (203, NEW.id);
+		-- Фид прокомментированных
+		insert into feeds (type, owner_id) values (202, NEW.id) returning id into feed202;
+		-- Фид лайкнутых
+		insert into feeds (type, owner_id) values (203, NEW.id) returning id into feed203;
+
+		-- Агрегатор подписан на свои фиды
+		insert into aggregates (owner_id, feed_ids) values (NEW.id, array[feed101, feed202, feed203, directId]);
+
 	end if;
 
 	return null;
